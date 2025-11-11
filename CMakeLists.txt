@@ -1,0 +1,13 @@
+cmake_minimum_required(VERSION 3.20)
+project(ToolChainPlayground CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+add_subdirectory(lessons/01_preprocessor_to_binary)
+add_subdirectory(lessons/02_vector_growth_and_invalidations)
+add_subdirectory(lessons/03_map_vs_unordered_map)
+add_subdirectory(lessons/04_asan_ubsan_memory_playground)
+add_subdirectory(lessons/05_custom_pool_and_allocator)
+add_subdirectory(lessons/06_odr_and_headers)
+add_subdirectory(lessons/07_static_vs_dynamic_linking)
+add_subdirectory(lessons/08_lto_and_pgo_basics)
