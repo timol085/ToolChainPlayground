@@ -1,0 +1,88 @@
+Step 1: Preprocessor, expand includes and macros (.i)
+
+The preprocessor copies the contents of the headers into the source and expands the macros, pure text transformation. The compiler has not parsed C++ yet.
+
+If we run the following:
+
+cd lessons/01_preprocessor_to_binary
+clang++ -std=c++20 -E main.cpp -o main.i
+
+The compiler has now preprocessed the C++ code, and we created a main.i file, this file is huge because <iostream> pulls in a lot. Our own code is found at the bottom and our included
+hpp file is now an inlined header text.
+
+#Include is a copy and paste of the header content during preprocessing.
+#pragma once (or include guards) prevents duplicate inclusion within the same translation unit.
+
+Step 2: Compilation to assembly (.s)
+
+The compiler parses the preprocessed C++ code and emits a human-readable assembly.
+
+clang++ -std=c++20 -x c++-cpp-output -S main.i -o main.s
+
+The created main.s file includes arm64 instructions for construction of iostream sentry, writing std::cout abd returning.
+
+Step 3: Assemble to object file (.o)
+
+Assembler converts assembly to machine code + sections (text, data, cstring...) and a symbol table. It is not a runnable program yet.
+
+clang++ -std=c++20 -c main.s -o main.o
+
+Inspect with:
+
+xcrun llvm-objdump --demangle -t main.o | less
+
+Stuff here must be resolved at link time by libraries. *UND* symbols (undefined) like std::__1::cout, iostream helper functions like ___gx_personality_v0 (C++ EH), _strlen
+
+Inspect sections
+
+xcrun llvm-objdump -section-headers main.o and/or nm -m main.o. / nm -gU --demangle main.o
+
+Step 4: Link to a runnable binary
+
+The linker resolves all the *UND* symbols against libraries and glues objects into an executable.
+
+clang++ main.o math_utils.cpp -o main
+
+Inspect linked libs
+
+otool -L main
+
+Run it
+
+./main
+
+Step 5: Verify sizes and strings (sanity checks)
+
+size main
+strings main | head
+
+This gives the segment sizes (text/data/bss) and lets you peak for embedded text.
+
+Step 6: See the whole pipeline in one go (quality-of-life)
+
+Keeps all temps automatically
+
+clang++ -std=c++20 -O2 -save-temps=obj main.cpp math_utils.cpp -o app
+# emits main.o, math_utils.o, and also main.i / main.s next to their objects
+
+Show underlying subcommands
+
+Step 7: Connect dots to headers and the ODR
+
+    - why headers contain templates/inline: templates must be visible to all TUs (Translation Units) using them (instantiation happens where used).
+      Inline functions avoid multiple-definition errors across TUs.
+    - headers vs source: math_utils.hpp has constexpr and templates (header-only), while math_utils.cpp could host non-template,
+      non-inline function definitions to centralize codegen and improve build times/ABI stability.
+    - ODR (One Definition Rule): if you define the same non-inline function in two TUs, linker error.
+      Try it: add a non-inline free function to both main.cpp and math_utils.cpp and watch the linker complain.
+
+Macro vs constexpr
+Header guards vs pragma once
+
+
+tiny checklist to ensure you’ve learned the step
+	- I can generate main.i, open it, and point to where my header got inlined.
+	- I can generate main.s, find _main, and roughly explain what the instructions are doing.
+	- I can show objdump -t main.o and identify _main vs *UND* symbols.
+	- I can link and use otool -L main to name the libraries.
+	- I can use -save-temps=obj and -###.
