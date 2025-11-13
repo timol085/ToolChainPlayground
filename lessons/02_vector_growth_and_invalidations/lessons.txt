@@ -1,0 +1,8 @@
+Lesson 2: Vector growth and invalidation
+Goal
+ - Understand size vs capacity
+ - Observe growth (reallocations) and element moves
+ - Know exact invalidation rules (and how to avoid surprises)
+ - Practice reserve, resize, shrink_to_fit, push_back vs emplace_back
+
+ Step 1: Instrumented capacity logger (precise growth pattern)
