@@ -6,3 +6,113 @@ Goal
  - Practice reserve, resize, shrink_to_fit, push_back vs emplace_back
 
  Step 1: Instrumented capacity logger (precise growth pattern)
+
+ start: size=0 cap=0 prev_cap=0x0
+ grow @i= 0 size= 1 cap= 1 data:0x6000036ac020
+ grow @i= 1 size= 2 cap= 2 data:0x6000036ac030  (RELOCATED)
+ grow @i= 2 size= 3 cap= 4 data:0x6000036ac020  (RELOCATED)
+ grow @i= 4 size= 5 cap= 8 data:0x6000034a9200  (RELOCATED)
+ grow @i= 8 size= 9 cap=16 data:0x6000021a81c0  (RELOCATED)
+ grow @i=16 size=17 cap=32 data:0x600001aa8080  (RELOCATED)
+ grow @i=32 size=33 cap=64 data:0x6000008a8000  (RELOCATED)
+ final: size=64 cap=64 data=0x6000008a8000
+
+ 	- Capacity jumps (e.g., 0→1→2→4→8→16…) or small quirks at tiny sizes (libc++ can do 0→1→2→3→… before doubling).
+ 	- “(RELOCATED)” tells you the buffer address changed → all pointers/iterators/references to elements are invalid.
+
+ std::vector stores elements contiguously; when size exceeds capacity it allocates a larger block (growth factor ~1.5–2×),
+ moves/copies elements, frees the old block; that invalidates all pointers/iterators/references.
+
+ Step 2: reserve vs resize
+
+ reserve prevents reallocation storms; resize actually creates/destroys elements to set size.
+
+ Step 3 Invalidation Demo
+ To use AdressSanitizer use:
+
+ cd lessons/02_vector_growth_and_invalidations
+ clang++ -std=c++20 -O0 -g -fsanitize=address,undefined main.cpp -o lesson02_asan
+ ./lesson02_asan
+
+lesson02_asan(90401,0x1f7704840) malloc: nano zone abandoned due to inability to reserve vm space.
+start: size=0 cap=0 prev_cap=0x0
+grow @i= 0 size= 1 cap= 1 data:0x6020000000b0
+grow @i= 1 size= 2 cap= 2 data:0x6020000000d0  (RELOCATED)
+grow @i= 2 size= 3 cap= 4 data:0x6020000000f0  (RELOCATED)
+grow @i= 4 size= 5 cap= 8 data:0x603000001bd0  (RELOCATED)
+grow @i= 8 size= 9 cap=16 data:0x6060000002c0  (RELOCATED)
+grow @i=16 size=17 cap=32 data:0x60c0000001c0  (RELOCATED)
+grow @i=32 size=33 cap=64 data:0x611000000040  (RELOCATED)
+reserve only: size=0 cap=100
+resize: size=5 cap=5
+before insert: *p=3
+=================================================================
+==90401==ERROR: AddressSanitizer: heap-use-after-free on address 0x603000001c3c at pc 0x0001003f1f04 bp 0x00016fa0ebf0 sp 0x00016fa0ebe8
+READ of size 4 at 0x603000001c3c thread T0
+    #0 0x0001003f1f00 in main main.cpp:55
+    #1 0x00018da14270  (<unknown module>)
+
+0x603000001c3c is located 12 bytes inside of 32-byte region [0x603000001c30,0x603000001c50)
+freed by thread T0 here:
+    #0 0x000100bffb0c in _ZdlPv+0x74 (libclang_rt.asan_osx_dynamic.dylib:arm64e+0x4bb0c)
+    #1 0x0001003fa1d8 in void std::__1::__libcpp_operator_delete[abi:ne190102]<void*>(void*) new:306
+    #2 0x0001003fa188 in void std::__1::__do_deallocate_handle_size[abi:ne190102]<>(void*, unsigned long) new:328
+    #3 0x0001003fa12c in std::__1::__libcpp_deallocate[abi:ne190102](void*, unsigned long, unsigned long) new:343
+    #4 0x0001003fa0bc in std::__1::allocator<int>::deallocate[abi:ne190102](int*, unsigned long) allocator.h:132
+    #5 0x0001003f9cb8 in std::__1::allocator_traits<std::__1::allocator<int>>::deallocate[abi:ne190102](std::__1::allocator<int>&, int*, unsigned long) allocator_traits.h:312
+    #6 0x0001003f9bc8 in std::__1::__split_buffer<int, std::__1::allocator<int>&>::~__split_buffer() __split_buffer:365
+    #7 0x0001003f7584 in std::__1::__split_buffer<int, std::__1::allocator<int>&>::~__split_buffer() __split_buffer:362
+    #8 0x0001003f3f00 in std::__1::vector<int, std::__1::allocator<int>>::insert(std::__1::__wrap_iter<int const*>, int&&) vector:1648
+    #9 0x0001003f1d84 in main main.cpp:52
+    #10 0x00018da14270  (<unknown module>)
+
+previously allocated by thread T0 here:
+    #0 0x000100bff6e4 in _Znwm+0x74 (libclang_rt.asan_osx_dynamic.dylib:arm64e+0x4b6e4)
+    #1 0x0001003f91e0 in void* std::__1::__libcpp_operator_new[abi:ne190102]<unsigned long>(unsigned long) new:297
+    #2 0x0001003f912c in std::__1::__libcpp_allocate[abi:ne190102](unsigned long, unsigned long) new:321
+    #3 0x0001003f906c in std::__1::allocator<int>::allocate[abi:ne190102](unsigned long) allocator.h:118
+    #4 0x0001003f8bdc in std::__1::__allocation_result<std::__1::allocator_traits<std::__1::allocator<int>>::pointer> std::__1::__allocate_at_least[abi:ne190102]<std::__1::allocator<int>>(std::__1::allocator<int>&, unsigned long) allocate_at_least.h:41
+    #5 0x0001003f8784 in std::__1::__split_buffer<int, std::__1::allocator<int>&>::__split_buffer(unsigned long, unsigned long, std::__1::allocator<int>&) __split_buffer:353
+    #6 0x0001003f6ec8 in std::__1::__split_buffer<int, std::__1::allocator<int>&>::__split_buffer(unsigned long, unsigned long, std::__1::allocator<int>&) __split_buffer:349
+    #7 0x0001003f3280 in std::__1::vector<int, std::__1::allocator<int>>::reserve(unsigned long) vector:1468
+    #8 0x0001003f1a5c in main main.cpp:44
+    #9 0x00018da14270  (<unknown module>)
+
+SUMMARY: AddressSanitizer: heap-use-after-free main.cpp:55 in main
+Shadow bytes around the buggy address:
+  0x603000001980: fa fa 00 00 00 00 fa fa 00 00 00 00 fa fa 00 00
+  0x603000001a00: 00 00 fa fa 00 00 00 00 fa fa 00 00 00 00 fa fa
+  0x603000001a80: 00 00 00 00 fa fa 00 00 00 00 fa fa 00 00 00 00
+  0x603000001b00: fa fa 00 00 00 00 fa fa 00 00 01 fa fa fa 00 00
+  0x603000001b80: 00 00 fa fa 00 00 00 00 fa fa fd fd fd fd fa fa
+=>0x603000001c00: 00 00 04 fa fa fa fd[fd]fd fd fa fa fa fa fa fa
+  0x603000001c80: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x603000001d00: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x603000001d80: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x603000001e00: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x603000001e80: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==90401==ABORTING
+after insert : *p=zsh: abort      ./lesson02_asan
+
+Step 4: push vs emplace
+
+Step 5: shrink_to_fit
